@@ -1,8 +1,9 @@
 """The Gmail specialist sub-agent: owns the Gmail MCP tools exclusively."""
+from pathlib import Path
 from langchain.agents import create_agent
 
-from .. import config
-from ..mcp_client import mcp_client
+from ..mcp_client import is_gmail_authenticated, mcp_client
+from ..models import get_chat_model
 
 SYSTEM_PROMPT = """You are the Gmail specialist on a team of AI assistants.
 
@@ -22,5 +23,21 @@ dump of raw tool output.
 
 async def build_email_expert():
     """Discover the Gmail MCP tools and assemble the specialist agent."""
+    keys_file = Path.home() / ".gmail-mcp" / "gcp-oauth.keys.json"
+    if not keys_file.exists():
+        print(
+            "[agent] email_expert: Gmail MCP is not configured.\n"
+            "       1. Place 'gcp-oauth.keys.json' in ~/.gmail-mcp/\n"
+            "       2. Run 'npx @gongrzhe/server-gmail-autoauth-mcp auth' to authenticate."
+        )
+        return None
+
+    if not is_gmail_authenticated():
+        print(
+            "[agent] email_expert: 'gcp-oauth.keys.json' found, but authentication is not completed.\n"
+            "       Run 'npx @gongrzhe/server-gmail-autoauth-mcp auth' in your terminal to log in."
+        )
+        return None
+
     gmail_tools = await mcp_client.get_tools(server_name="gmail")
-    return create_agent(config.CHAT_MODEL, tools=gmail_tools, system_prompt=SYSTEM_PROMPT)
+    return create_agent(get_chat_model(), tools=gmail_tools, system_prompt=SYSTEM_PROMPT)

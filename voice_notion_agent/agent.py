@@ -22,6 +22,7 @@ from .agents.email_expert import build_email_expert
 from .agents.notion_expert import build_notion_expert
 from .agents.researcher import build_researcher
 from .logging_utils import log_stage
+from .models import get_chat_model
 
 ORCHESTRATOR_SYSTEM_PROMPT = """You are Aria, a voice-controlled executive assistant.
 
@@ -46,18 +47,7 @@ _SPECIALIST_BUILD_TIMEOUT = 20.0
 
 
 async def _try_build(build_fn, name: str):
-    """Build a specialist, but never let its failure - or hang - take down the others.
-
-    A specialist can fail to start for reasons outside our code - an
-    expired/missing MCP auth token, a misconfigured OAuth app, npx unable
-    to reach the network. Without the try/except, asyncio.gather would
-    propagate the first exception and cancel every sibling task, so one bad
-    token would crash the Orchestrator (and both other specialists)
-    entirely. The timeout matters separately: mcp-remote with no cached
-    Notion token doesn't raise, it opens an interactive OAuth URL and waits
-    forever for a browser that will never visit it on a headless server -
-    an exception handler alone would never fire.
-    """
+    """Build a specialist, but never let its failure - or hang - take down the others."""
     try:
         return await asyncio.wait_for(build_fn(), timeout=_SPECIALIST_BUILD_TIMEOUT)
     except TimeoutError:
@@ -113,4 +103,4 @@ async def build_agent():
         return output
 
     tools = [notion_expert, email_expert, researcher]
-    return create_agent(config.CHAT_MODEL, tools=tools, system_prompt=ORCHESTRATOR_SYSTEM_PROMPT)
+    return create_agent(get_chat_model(), tools=tools, system_prompt=ORCHESTRATOR_SYSTEM_PROMPT)

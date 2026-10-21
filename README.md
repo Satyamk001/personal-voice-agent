@@ -1,7 +1,7 @@
 # LangChain Voice Agent for Gmail + Notion
 
 A voice-controlled executive assistant, built with LangChain's `create_agent`
-and the OpenAI API, that takes spoken commands and acts on your real Gmail
+Google Gemini (LLM & STT), Tavily Search, and Microsoft Edge-TTS, that takes spoken commands and acts on your real Gmail
 inbox and Notion workspace — checking email, drafting and sending replies,
 researching a topic on the web, and writing the results into Notion pages.
 
@@ -43,7 +43,7 @@ This repo is the companion code for a type-along video tutorial. See
 
 ```mermaid
 flowchart LR
-    Browser["Browser\n(record button, MediaRecorder)"] --> STT["OpenAI Whisper\n(speech to text)"]
+    Browser["Browser\n(record button, MediaRecorder)"] --> STT["Gemini Audio / Groq Whisper\n(speech to text)"]
     STT --> Orch["Orchestrator\ncreate_agent"]
     Orch -->|delegate| NE["notion_expert\ncreate_agent"]
     Orch -->|delegate| EE["email_expert\ncreate_agent"]
@@ -53,7 +53,7 @@ flowchart LR
     RS -->|tool call| Search["Tavily search + LLM summarize"]
     NotionMCP --> Notion[("Notion Workspace")]
     GmailMCP --> Gmail[("Gmail")]
-    Orch --> TTS["OpenAI TTS\n(text to speech)"]
+    Orch --> TTS["Edge-TTS\n(free neural speech)"]
     TTS --> Browser
     Orch -.trace.-> LangSmith[("LangSmith")]
     NE -.trace.-> LangSmith
@@ -129,7 +129,7 @@ render.yaml              # Render Docker-based web service config
    ```
 
 2. Copy `.env.example` to `.env` and fill in:
-   - `OPENAI_API_KEY` — from https://platform.openai.com/api-keys
+   - `GEMINI_API_KEY` — from https://aistudio.google.com (or optional `OPENAI_API_KEY` / `GROQ_API_KEY`)
    - `TAVILY_API_KEY` — from https://app.tavily.com (used by the
      `research_topic` tool for web search)
 
@@ -212,11 +212,11 @@ required, since capture and playback both happen in the browser.
 ```mermaid
 flowchart LR
     Browser["Browser\n(record button, MediaRecorder)"] -->|POST /api/voice| Server["FastAPI server\n(webapp/server.py)"]
-    Server --> STT["Whisper API"]
+    Server --> STT["Gemini Audio / Groq STT"]
     STT --> Agent["Same Orchestrator\n+ specialists"]
     Agent --> Gmail[("Gmail MCP")]
     Agent --> Notion[("Notion MCP")]
-    Agent --> TTS["OpenAI TTS"]
+    Agent --> TTS["Edge-TTS (Neural)"]
     TTS -->|base64 audio| Browser
 ```
 

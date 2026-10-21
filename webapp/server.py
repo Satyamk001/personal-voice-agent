@@ -1,14 +1,13 @@
 """FastAPI web demo: browser mic -> STT -> agent -> Gmail/Notion (MCP) -> TTS -> browser audio.
 
-This wraps the same voice_notion_agent package used by the CLI in main.py.
-It exists so the project can be demoed live from a shareable URL (e.g. on
-Render) instead of only from a local terminal.
+This wraps the voice_notion_agent package.
+It exists so the project can be demoed live from a shareable URL instead of only from a local terminal.
 
 State is kept in a plain in-memory dict keyed by a client-generated session
 id. That's fine for a single-instance demo deployment; it is not meant to
 survive restarts or scale beyond one process.
 
-SECURITY NOTE: the agent now has real Gmail (read/send) and Notion access
+SECURITY NOTE: the agent has real Gmail (read/send) and Notion access
 via MCP. If AUTH_PASSWORD is set, every route (including the page itself)
 requires HTTP Basic Auth - the browser's native login prompt, checked
 against AUTH_USERNAME/AUTH_PASSWORD. Set this before exposing the service
@@ -18,6 +17,7 @@ real Gmail account.
 import base64
 import os
 import secrets
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,13 +27,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from langchain.messages import HumanMessage
-from openai import BadRequestError
 
 from voice_notion_agent import config
 from voice_notion_agent.agent import build_agent
 from voice_notion_agent.logging_utils import log_stage
 from voice_notion_agent.speech_to_text import transcribe_audio
-from voice_notion_agent.text_to_speech import synthesize_speech
+from voice_notion_agent.text_to_speech import synthesize_speech, synthesize_speech_async
 
 config.validate()
 
@@ -47,12 +46,7 @@ _basic_auth = HTTPBasic(auto_error=False)
 
 
 def _require_auth(credentials: HTTPBasicCredentials | None = Depends(_basic_auth)) -> None:
-    """No-op if AUTH_PASSWORD isn't set; otherwise requires matching HTTP Basic Auth.
-
-    auto_error=False on HTTPBasic means a missing Authorization header comes
-    back as None instead of an immediate 401 - that's what lets local dev
-    (no AUTH_PASSWORD set) skip auth entirely rather than always prompting.
-    """
+    """No-op if AUTH_PASSWORD isn't set; otherwise requires matching HTTP Basic Auth."""
     if not _AUTH_PASSWORD:
         return
     valid = credentials is not None and (
@@ -112,13 +106,10 @@ async def chat(message: str = Form(...), session_id: str = Form(...)) -> JSONRes
 @app.post("/api/voice", dependencies=[Depends(_require_auth)])
 async def voice(audio: UploadFile = File(...), session_id: str = Form(...)) -> JSONResponse:
     """Voice turn: browser sends a recorded clip, we return text + spoken reply."""
-    # Keep whatever extension the browser actually sent (webm/ogg/mp4) -
-    # Whisper uses it as a hint for which container/codec to decode, so
-    # saving everything as .webm regardless of the real format is what
-    # causes "could not be decoded" errors on browsers that don't record
-    # webm/opus.
     suffix = Path(audio.filename or "command.webm").suffix or ".webm"
-    tmp_path = f"/tmp/{uuid.uuid4()}{suffix}"
+    temp_dir = Path(tempfile.gettempdir())
+    tmp_path = str(temp_dir / f"{uuid.uuid4()}{suffix}")
+
     audio_bytes = await audio.read()
     with open(tmp_path, "wb") as f:
         f.write(audio_bytes)
@@ -130,7 +121,7 @@ async def voice(audio: UploadFile = File(...), session_id: str = Form(...)) -> J
 
     try:
         transcript = transcribe_audio(tmp_path)
-    except BadRequestError as exc:
+    except Exception as exc:
         print(f"[voice] transcription failed: {exc}")
         return JSONResponse(
             {
@@ -139,6 +130,12 @@ async def voice(audio: UploadFile = File(...), session_id: str = Form(...)) -> J
                 "audio_base64": None,
             }
         )
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
 
     print(f"[voice] transcript: {transcript!r}")
 
@@ -149,8 +146,15 @@ async def voice(audio: UploadFile = File(...), session_id: str = Form(...)) -> J
 
     reply = await _run_agent_turn(session_id, transcript)
 
-    speech_path = synthesize_speech(reply)
-    with open(speech_path, "rb") as f:
-        audio_b64 = base64.b64encode(f.read()).decode("ascii")
+    speech_path = await synthesize_speech_async(reply)
+    try:
+        with open(speech_path, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("ascii")
+    finally:
+        try:
+            if os.path.exists(speech_path):
+                os.remove(speech_path)
+        except OSError:
+            pass
 
     return JSONResponse({"transcript": transcript, "reply": reply, "audio_base64": audio_b64})

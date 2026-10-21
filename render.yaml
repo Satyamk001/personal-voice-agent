@@ -18,9 +18,13 @@ services:
     env: docker
     plan: free
     envVars:
-      - key: OPENAI_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
       - key: TAVILY_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: AUTH_USERNAME
         value: demo
@@ -39,10 +43,12 @@ services:
       - key: LANGSMITH_PROJECT
         value: voice-agent-demo
       - key: CHAT_MODEL
-        value: gpt-4o-mini
+        value: gemini-3.8-flash
+      - key: STT_PROVIDER
+        value: gemini
       - key: STT_MODEL
-        value: whisper-1
-      - key: TTS_MODEL
-        value: tts-1
+        value: gemini-3.8-flash
+      - key: TTS_PROVIDER
+        value: edge-tts
       - key: TTS_VOICE
-        value: alloy
+        value: en-US-AriaNeural

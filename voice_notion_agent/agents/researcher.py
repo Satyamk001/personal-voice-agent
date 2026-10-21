@@ -1,7 +1,7 @@
 """The web-research specialist sub-agent."""
 from langchain.agents import create_agent
 
-from .. import config
+from ..models import get_chat_model
 from ..tools.research_tool import research_topic
 
 SYSTEM_PROMPT = """You are the research specialist on a team of AI assistants.
@@ -18,4 +18,4 @@ Return only the summary itself, ready to be handed to another assistant
 
 async def build_researcher():
     """Assemble the research specialist agent."""
-    return create_agent(config.CHAT_MODEL, tools=[research_topic], system_prompt=SYSTEM_PROMPT)
+    return create_agent(get_chat_model(), tools=[research_topic], system_prompt=SYSTEM_PROMPT)

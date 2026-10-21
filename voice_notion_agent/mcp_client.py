@@ -1,58 +1,80 @@
 """MCP server connections for Gmail and Notion.
 
-Both are reached over stdio, via a local Node process. Neither takes
+Both are reached over stdio via a local Node process. Neither takes
 credentials in this config - each authenticates itself using a token
-cached on disk by a one-time interactive setup command that you run
-yourself before starting the agent:
+cached on disk by a one-time interactive setup command:
 
-Gmail (community server, @gongrzhe/server-gmail-autoauth-mcp):
-    1. Create a Google Cloud OAuth client (type "Web application",
-       redirect URI http://localhost:3000/oauth2callback), download it,
-       and save it as ~/.gmail-mcp/gcp-oauth.keys.json.
-    2. Run once: npx @gongrzhe/server-gmail-autoauth-mcp auth
-       This opens a browser for Google login and caches a token at
-       ~/.gmail-mcp/credentials.json.
-    3. Install the server as a global binary so it's on PATH:
-       npm install -g @gongrzhe/server-gmail-autoauth-mcp
+Gmail:  npx @gongrzhe/server-gmail-autoauth-mcp auth (saved to ~/.gmail-mcp/credentials.json)
+Notion: npx -y mcp-remote https://mcp.notion.com/mcp (saved to ~/.mcp-auth/)
 
-Notion (official hosted MCP server at mcp.notion.com, reached through the
-mcp-remote stdio bridge - Notion's older token-based
-@notionhq/notion-mcp-server is deprecated and 400s on tool calls, so don't
-use it):
-    1. Run once: npx -y mcp-remote https://mcp.notion.com/mcp
-       This opens a browser for a Notion OAuth consent screen and caches
-       a token under ~/.mcp-auth/.
-    2. Install the bridge as a global binary so it's on PATH:
-       npm install -g mcp-remote
-
-After the one-time steps above, the config below launches each server's
-already-installed binary directly (gmail-mcp / mcp-remote) rather than
-going through `npx <pkg>`. This matters even when the package is already
-installed: `npx` still performs its own registry/update check on every
-invocation before running the command, and on a host where that specific
-call is slow or blocked (observed on Render, while other outbound HTTPS
-traffic - e.g. Notion's connection to mcp.notion.com - worked fine), npx
-hangs with no output until something else times it out, which surfaces
-as "the Gmail/Notion integration isn't available" with no real error to
-debug from. Calling the installed binary directly skips that check
-entirely. The Dockerfile already `npm install -g`s both packages so this
-works out of the box in the container; for local dev, run the two
-`npm install -g` commands above once. See README.md / tutorial.md for the
-full walkthrough.
+Executable paths are resolved using shutil.which() so Windows can launch .CMD
+scripts properly without throwing [WinError 2].
 """
+import shutil
+from pathlib import Path
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-mcp_client = MultiServerMCPClient(
-    {
-        "gmail": {
+
+def resolve_cmd(cmd: str) -> str | None:
+    """Resolve an executable's absolute path (including .CMD on Windows)."""
+    return shutil.which(cmd)
+
+
+def is_notion_authenticated() -> bool:
+    """Check if Notion OAuth tokens exist in ~/.mcp-auth."""
+    auth_dir = Path.home() / ".mcp-auth"
+    if not auth_dir.exists():
+        return False
+    # mcp-remote stores tokens in files ending with tokens.json or containing token
+    token_files = list(auth_dir.glob("**/*token*.json"))
+    return len(token_files) > 0
+
+
+def is_gmail_authenticated() -> bool:
+    """Check if Gmail OAuth credentials exist in ~/.gmail-mcp/credentials.json."""
+    creds_file = Path.home() / ".gmail-mcp" / "credentials.json"
+    return creds_file.exists()
+
+
+def get_mcp_client() -> MultiServerMCPClient:
+    """Assemble the MultiServerMCPClient with resolved command paths."""
+    connections = {}
+
+    # Notion stdio bridge
+    notion_cmd = resolve_cmd("mcp-remote")
+    if notion_cmd:
+        connections["notion"] = {
             "transport": "stdio",
-            "command": "gmail-mcp",
-            "args": [],
-        },
-        "notion": {
-            "transport": "stdio",
-            "command": "mcp-remote",
+            "command": notion_cmd,
             "args": ["https://mcp.notion.com/mcp"],
-        },
-    }
-)
+        }
+    else:
+        npx_cmd = resolve_cmd("npx")
+        if npx_cmd:
+            connections["notion"] = {
+                "transport": "stdio",
+                "command": npx_cmd,
+                "args": ["-y", "mcp-remote", "https://mcp.notion.com/mcp"],
+            }
+
+    # Gmail stdio server
+    gmail_cmd = resolve_cmd("gmail-mcp")
+    if gmail_cmd:
+        connections["gmail"] = {
+            "transport": "stdio",
+            "command": gmail_cmd,
+            "args": [],
+        }
+    else:
+        npx_cmd = resolve_cmd("npx")
+        if npx_cmd:
+            connections["gmail"] = {
+                "transport": "stdio",
+                "command": npx_cmd,
+                "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+            }
+
+    return MultiServerMCPClient(connections)
+
+
+mcp_client = get_mcp_client()
