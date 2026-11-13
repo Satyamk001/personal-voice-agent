@@ -3,7 +3,7 @@ from langchain_core.tools import tool
 from langchain_tavily import TavilySearch
 
 from .. import config
-from ..logging_utils import log_stage
+from ..logging_utils import extract_text, log_stage
 from ..models import get_chat_model
 
 _search = None
@@ -48,5 +48,6 @@ def research_topic(topic: str) -> str:
     )
     llm = _get_llm()
     response = llm.invoke(prompt)
-    log_stage("summarize LLM -> researcher", output=response.content)
-    return response.content
+    summary_text = extract_text(response.content)
+    log_stage("summarize LLM -> researcher", output=summary_text)
+    return summary_text

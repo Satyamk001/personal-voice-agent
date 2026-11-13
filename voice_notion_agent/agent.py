@@ -21,7 +21,7 @@ from . import config
 from .agents.email_expert import build_email_expert
 from .agents.notion_expert import build_notion_expert
 from .agents.researcher import build_researcher
-from .logging_utils import log_stage
+from .logging_utils import extract_text, log_stage
 from .models import get_chat_model
 
 ORCHESTRATOR_SYSTEM_PROMPT = """You are Aria, a voice-controlled executive assistant.
@@ -76,7 +76,7 @@ async def build_agent():
             return "The Notion integration isn't available on this server right now."
         log_stage("Orchestrator -> notion_expert", input=request)
         result = await notion_agent.ainvoke({"messages": [HumanMessage(content=request)]})
-        output = result["messages"][-1].content
+        output = extract_text(result["messages"][-1].content)
         log_stage("notion_expert -> Orchestrator", output=output)
         return output
 
@@ -87,7 +87,7 @@ async def build_agent():
             return "The Gmail integration isn't available on this server right now."
         log_stage("Orchestrator -> email_expert", input=request)
         result = await email_agent.ainvoke({"messages": [HumanMessage(content=request)]})
-        output = result["messages"][-1].content
+        output = extract_text(result["messages"][-1].content)
         log_stage("email_expert -> Orchestrator", output=output)
         return output
 
@@ -98,7 +98,7 @@ async def build_agent():
             return "The research tool isn't available on this server right now."
         log_stage("Orchestrator -> researcher", input=topic)
         result = await research_agent.ainvoke({"messages": [HumanMessage(content=topic)]})
-        output = result["messages"][-1].content
+        output = extract_text(result["messages"][-1].content)
         log_stage("researcher -> Orchestrator", output=output)
         return output
 
