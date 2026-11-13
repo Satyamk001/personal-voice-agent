@@ -1,4 +1,10 @@
-"""Speech-to-text via Google Gemini multimodal audio, free Groq Whisper, or OpenAI."""
+"""Speech-to-text with automatic provider fallback.
+
+Fallback chain (configurable via STT_FALLBACK_CHAIN env var):
+  groq (Whisper)  →  gemini (multimodal audio)
+
+On rate-limit or transient errors the next provider is tried transparently.
+"""
 import os
 from pathlib import Path
 
@@ -20,6 +26,8 @@ def _get_audio_mime_type(file_path: str) -> str:
     return _EXT_TO_MIME.get(suffix, "audio/webm")
 
 
+# ── Individual provider implementations ──────────────────────────────
+
 def _transcribe_with_gemini(file_path: str) -> str:
     from google import genai
     from google.genai import types
@@ -31,7 +39,7 @@ def _transcribe_with_gemini(file_path: str) -> str:
         audio_data = f.read()
 
     response = client.models.generate_content(
-        model=config.STT_MODEL if config.STT_MODEL.startswith("gemini") else "gemini-3.8-flash",
+        model=config.GEMINI_CHAT_MODEL if config.GEMINI_CHAT_MODEL.startswith("gemini") else "gemini-3.8-flash",
         contents=[
             types.Part.from_bytes(data=audio_data, mime_type=mime_type),
             (
@@ -70,21 +78,59 @@ def _transcribe_with_openai(file_path: str) -> str:
     return transcript.text.strip() if transcript.text else ""
 
 
+_STT_PROVIDERS = {
+    "groq": _transcribe_with_groq,
+    "gemini": _transcribe_with_gemini,
+    "openai": _transcribe_with_openai,
+}
+
+
+def _is_rate_limit_or_transient(exc: Exception) -> bool:
+    """Return True if the exception looks like a rate-limit or transient error."""
+    msg = str(exc).lower()
+    signals = [
+        "429", "rate_limit", "rate limit", "ratelimit",
+        "quota", "resource_exhausted", "too many requests",
+        "503", "502", "service unavailable", "overloaded",
+    ]
+    return any(s in msg for s in signals)
+
+
 def transcribe_audio(file_path: str) -> str:
-    """Transcribe a local audio file to text using the configured provider."""
-    provider = config.STT_PROVIDER
-    log_stage(f"Mic -> STT ({provider})", input=f"<audio file: {file_path}>")
+    """Transcribe a local audio file, walking the STT fallback chain.
 
-    if provider == "gemini":
-        text = _transcribe_with_gemini(file_path)
-    elif provider == "groq":
-        text = _transcribe_with_groq(file_path)
-    elif provider == "openai":
-        text = _transcribe_with_openai(file_path)
-    else:
-        raise ValueError(
-            f"Unsupported STT_PROVIDER: {provider}. Supported options: gemini, groq, openai."
-        )
+    Tries each configured STT provider in order; on rate-limit or transient
+    errors, moves to the next. Non-rate-limit errors are raised immediately.
+    """
+    chain = config.get_stt_fallback_chain()
+    if not chain:
+        raise RuntimeError("No STT provider has an API key configured.")
 
-    log_stage("STT -> Orchestrator", output=text)
-    return text
+    log_stage(f"Mic -> STT (chain: {' → '.join(chain)})", input=f"<audio file: {file_path}>")
+
+    last_exc: Exception | None = None
+    for provider in chain:
+        transcribe_fn = _STT_PROVIDERS.get(provider)
+        if not transcribe_fn:
+            log_stage("STT skip", provider=provider, error="Unknown provider")
+            continue
+
+        try:
+            log_stage(f"STT trying", provider=provider)
+            text = transcribe_fn(file_path)
+            log_stage(f"STT success ({provider})", output=text)
+            return text
+        except Exception as exc:
+            last_exc = exc
+            if _is_rate_limit_or_transient(exc):
+                log_stage(
+                    "STT fallback",
+                    provider=provider,
+                    error=f"Rate-limited / transient ({type(exc).__name__}), trying next...",
+                )
+                continue
+            # Non-transient error: propagate
+            raise
+
+    # All providers exhausted
+    raise last_exc  # type: ignore[misc]
