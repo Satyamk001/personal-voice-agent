@@ -12,3 +12,4 @@ python-multipart>=0.0.9
 # Optional provider adapters
 openai>=1.40.0
 langchain-groq>=0.2.0
+langchain-openrouter>=0.2.0

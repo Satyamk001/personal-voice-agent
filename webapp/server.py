@@ -26,11 +26,12 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from langchain.messages import HumanMessage
 
 from voice_notion_agent import config
 from voice_notion_agent.agent import build_agent
-from voice_notion_agent.logging_utils import log_stage
+from voice_notion_agent.logging_utils import extract_text, log_stage
 from voice_notion_agent.speech_to_text import transcribe_audio
 from voice_notion_agent.text_to_speech import synthesize_speech, synthesize_speech_async
 
@@ -76,12 +77,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR = Path(__file__).parent / "static"
+FRONTEND_DIST_DIR = Path(__file__).parent.parent / "frontend" / "dist"
+
+if (FRONTEND_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend_assets")
 
 
 @app.get("/", dependencies=[Depends(_require_auth)])
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if not index_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Frontend build not found. Run 'cd frontend && npm run build' first.",
+        )
+    return FileResponse(index_file)
 
 
 async def _run_agent_turn(session_id: str, transcript: str) -> str:
@@ -91,7 +101,7 @@ async def _run_agent_turn(session_id: str, transcript: str) -> str:
     result = await _agent.ainvoke({"messages": messages})
     messages = result["messages"][-_MAX_HISTORY_MESSAGES:]
     _sessions[session_id] = messages
-    reply = messages[-1].content
+    reply = extract_text(messages[-1].content)
     log_stage("Orchestrator -> User", output=reply)
     return reply
 

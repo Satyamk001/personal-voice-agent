@@ -106,9 +106,9 @@ voice_notion_agent/
 └── tools/
     └── research_tool.py  # web search (Tavily) + LLM summarization
 
+frontend/                # React 19 + TypeScript + Tailwind SPA
 webapp/
-├── server.py            # FastAPI app: browser mic -> STT -> agent -> TTS
-└── static/index.html    # single-page UI (record button + text fallback)
+└── server.py            # FastAPI backend: browser mic -> STT -> agent -> TTS
 
 Dockerfile               # Python + Node.js (MCP servers run via npx)
 render.yaml              # Render Docker-based web service config
@@ -161,16 +161,32 @@ render.yaml              # Render Docker-based web service config
    - Don't use the older `@notionhq/notion-mcp-server` package — it's
      deprecated and its token-based auth 400s on tool calls now.
 
-5. Run the web app (see [Browser demo + deployment](#browser-demo--deployment)
-   below):
+5. Run the web app:
 
-   ```bash
-   uvicorn webapp.server:app --reload --port 8000
-   ```
+   **Option A: React Frontend (Recommended for development)**
+   - Start the FastAPI backend:
+     ```bash
+     uvicorn webapp.server:app --reload --port 8000
+     ```
+   - In a second terminal, start the Vite dev server:
+     ```bash
+     cd frontend
+     npm install
+     npm run dev
+     ```
+   - Open http://localhost:3000 — Vite automatically proxies `/api` calls to the backend on port 8000.
 
-   Open http://localhost:8000, hold the record button, and speak a
-   command — mic capture and playback happen entirely in the browser via
-   `MediaRecorder`/`<audio>`, so no local audio device setup is needed.
+   **Option B: Production / Single-Server Mode**
+   - Build the React frontend once:
+     ```bash
+     cd frontend
+     npm run build
+     ```
+   - Start FastAPI:
+     ```bash
+     uvicorn webapp.server:app --reload --port 8000
+     ```
+   - Open http://localhost:8000 — FastAPI will serve the compiled React SPA directly from `frontend/dist`.
 
 ## Notes on platform quirks
 
